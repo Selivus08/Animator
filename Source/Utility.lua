@@ -3,16 +3,7 @@ local Utility = {}
 local tinsert = table.insert
 local format = string.format
 
-function Utility:sendNotif(Text, Icon, Duration, Button1, Button2, Callback)
-	game:GetService("StarterGui"):SetCore("SendNotification", {
-		Title = "Animator",
-		Text = (Text .. "\nBy hayper#0001") or nil,
-		Icon = Icon or nil,
-		Duration = Duration or nil,
-		Button1 = Button1 or nil,
-		Button2 = Button2 or nil,
-		Callback = Callback or nil,
-	})
+function Utility:sendNotif(...)
 end
 
 local EnumTable = {
