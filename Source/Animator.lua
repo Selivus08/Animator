@@ -1,4 +1,4 @@
-
+-- Full patched Animator.lua
 
 local TweenService = game:GetService("TweenService")
 
@@ -8,7 +8,7 @@ local Utility = animatorRequire("Utility.lua")
 local Signal = animatorRequire("Nevermore/Signal.lua")
 local Maid = animatorRequire("Nevermore/Maid.lua")
 
-
+-- Deep-merge helper for tables
 local function merge(t1, t2)
     for k, v in pairs(t2) do
         if type(v) == "table" then
@@ -33,12 +33,12 @@ local spawn = task.spawn
 local wait = task.wait
 local clock = os.clock
 
-
+-- Type-check for Animator
 function Animator.isAnimator(value)
     return type(value) == "table" and getmetatable(value) == Animator
 end
 
-
+-- Constructor
 function Animator.new(Character, AnimationResolvable)
     if typeof(Character) ~= "Instance" then
         error(format("invalid argument 1 to 'new' (Instance expected, got %s)", typeof(Character)))
@@ -86,7 +86,7 @@ function Animator.new(Character, AnimationResolvable)
     self.Looped = self.AnimationData.Loop
     self.Length = self.AnimationData.Frames[#self.AnimationData.Frames].Time
 
-
+    -- Maid and signals
     self._maid = Maid.new()
     self.DidLoop = Signal.new()
     self.Stopped = Signal.new()
@@ -99,7 +99,7 @@ function Animator.new(Character, AnimationResolvable)
     return self
 end
 
-
+-- Ignore lists APIs
 function Animator:IgnoreMotor(inst)
     assert(typeof(inst) == "Instance" and inst.ClassName == "Motor6D", "Motor6D expected")
     table.insert(self.MotorIgnoreList, inst)
@@ -149,7 +149,7 @@ function Animator:_playPose(pose, parent, fade)
     end
 end
 
-
+-- Play the custom animation
 function Animator:Play(fadeTime, weight, speed)
     fadeTime = fadeTime or 0.1
     if not self.Character or not self.Character.Parent or (self._playing and not self._isLooping) then return end
@@ -163,7 +163,7 @@ function Animator:Play(fadeTime, weight, speed)
     self._disabledAnimator = false
     self._disabledAnimateScript = nil
 
-
+    -- Disconnect on death
     local deathConn
     if Humanoid then
         deathConn = Humanoid.Died:Connect(function()
@@ -171,7 +171,7 @@ function Animator:Play(fadeTime, weight, speed)
         end)
     end
 
-
+    -- Handle default Animator
     if self.handleVanillaAnimator then
         local AnimateScript = self.Character:FindFirstChild("Animate")
         if AnimateScript and not AnimateScript.Disabled then
@@ -188,7 +188,7 @@ function Animator:Play(fadeTime, weight, speed)
         end
     end
 
-
+    -- Clean up if parent removed
     local parentConn = self.Character:GetPropertyChangedSignal("Parent"):Connect(function()
         if not self.Character.Parent then self:Destroy() end
     end)
@@ -218,31 +218,38 @@ function Animator:Play(fadeTime, weight, speed)
             if t > clock() - startTime then repeat wait() until self._stopped or clock() - startTime >= t end
         end
 
-
+        -- Disconnect above connections
         if deathConn then deathConn:Disconnect() end
         if parentConn then parentConn:Disconnect() end
 
-
+        -- Loop handling
         if self.Looped and not self._stopped then
             self.DidLoop:Fire()
             self._isLooping = true
             return self:Play(fadeTime, weight, speed)
         end
 
-
+        -- Reset transforms on all driven objects
         local motorMap = Utility:getMotorMap(self.Character, {IgnoreIn=self.MotorIgnoreInList, IgnoreList=self.MotorIgnoreList})
         local boneMap  = Utility:getBoneMap(self.Character, {IgnoreIn=self.BoneIgnoreInList, IgnoreList=self.BoneIgnoreList})
         for _, grp in pairs(motorMap) do for _, lst in pairs(grp) do for _, m in ipairs(lst) do m.Transform = CFrame.new() end end end
         for _, grp in pairs(boneMap)  do for _, lst in pairs(grp) do for _, b in ipairs(lst) do b.Transform = CFrame.new() end end end
 
+                -- Delay then restore default Animator and re-run Animate script if we disabled them
         task.delay(0.05, function()
             if self.Character and self.handleVanillaAnimator then
                 local H = self.Character:FindFirstChild("Humanoid")
+                -- Restore default Animator instance
                 if self._disabledAnimator and H and not H:FindFirstChildOfClass("Animator") then
                     Instance.new("Animator").Parent = H
                 end
-                if self._disabledAnimateScript and self._disabledAnimateScript.Parent then
-                    self._disabledAnimateScript.Disabled = false
+                -- Reinitialize Animate script by cloning and replacing
+                if self._disabledAnimateScript then
+                    local originalScript = self._disabledAnimateScript
+                    local newScript = originalScript:Clone()
+                    newScript.Disabled = false
+                    newScript.Parent = self.Character
+                    originalScript:Destroy()
                 end
             end
         end)
@@ -255,7 +262,7 @@ function Animator:Play(fadeTime, weight, speed)
     end)
 end
 
-
+-- Returns time for named keyframe
 function Animator:GetTimeOfKeyframe(name)
     for _, f in ipairs(self.AnimationData.Frames) do
         if f.Name == name then return f.Time end
@@ -263,7 +270,7 @@ function Animator:GetTimeOfKeyframe(name)
     return 0
 end
 
-
+-- Provides a signal for markers
 function Animator:GetMarkerReachedSignal(name)
     if not self._markerSignal[name] then
         local sig = Signal.new()
@@ -273,18 +280,18 @@ function Animator:GetMarkerReachedSignal(name)
     return self._markerSignal[name]
 end
 
-
+-- Adjust playback speed
 function Animator:AdjustSpeed(speed)
     self.Speed = speed
 end
 
-
+-- Stops playback gracefully
 function Animator:Stop(fadeTime)
     self._stopFadeTime = fadeTime or self._stopFadeTime
     self._stopped = true
 end
 
-
+-- Cleans up the Animator
 function Animator:Destroy()
     if not self._stopped then
         self:Stop(0)
