@@ -235,21 +235,17 @@ function Animator:Play(fadeTime, weight, speed)
         for _, grp in pairs(motorMap) do for _, lst in pairs(grp) do for _, m in ipairs(lst) do m.Transform = CFrame.new() end end end
         for _, grp in pairs(boneMap)  do for _, lst in pairs(grp) do for _, b in ipairs(lst) do b.Transform = CFrame.new() end end end
 
-                -- Delay then restore default Animator and re-run Animate script if we disabled them
+                        -- Delay then restore default Animator and Animate if we disabled them
         task.delay(0.05, function()
             if self.Character and self.handleVanillaAnimator then
                 local H = self.Character:FindFirstChild("Humanoid")
-                -- Restore default Animator instance
+                -- Recreate Animator if needed
                 if self._disabledAnimator and H and not H:FindFirstChildOfClass("Animator") then
                     Instance.new("Animator").Parent = H
                 end
-                -- Reinitialize Animate script by cloning and replacing
-                if self._disabledAnimateScript then
-                    local originalScript = self._disabledAnimateScript
-                    local newScript = originalScript:Clone()
-                    newScript.Disabled = false
-                    newScript.Parent = self.Character
-                    originalScript:Destroy()
+                -- Simply re-enable Animate script
+                if self._disabledAnimateScript and self._disabledAnimateScript.Parent then
+                    self._disabledAnimateScript.Disabled = false
                 end
             end
         end)
