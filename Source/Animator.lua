@@ -200,21 +200,24 @@ function Animator:Play(fadeTime, weight, speed)
 				deathConnection:Disconnect()
 			end)
 		end
+		self._disabledAnimator = nil
+		self._disabledAnimateScript = nil
+
 		if self.handleVanillaAnimator then
 			local AnimateScript = self.Character:FindFirstChild("Animate")
-			if AnimateScript then
+			if AnimateScript and not AnimateScript.Disabled then
 				AnimateScript.Disabled = true
+				self._disabledAnimateScript = AnimateScript
 			end
+
 			if Humanoid then
 				local characterAnimator = Humanoid:FindFirstChild("Animator")
 				if characterAnimator then
-					do
-						local animationTrack = characterAnimator:GetPlayingAnimationTracks()
-						for i = 1, #animationTrack do
-							animationTrack[i]:Stop()
-						end
+					for _, track in ipairs(characterAnimator:GetPlayingAnimationTracks()) do
+						track:Stop()
 					end
 					characterAnimator:Destroy()
+					self._disabledAnimator = true
 				end
 			end
 		end
