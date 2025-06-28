@@ -182,117 +182,85 @@ function Animator:_playPose(pose, parent, fade)
 	end
 end
 
-function Animator:Play(fadeTime, weight, speed)
-	fadeTime = fadeTime or 0.100000001
-	if not self.Character or self.Character.Parent == nil or self._playing and not self._isLooping then
-		return
-	end
-	self._playing = true
-	self._isLooping = false
-	self.IsPlaying = true
-	local deathConnection
-	local noParentConnection
-	do
-		local Humanoid = self.Character:FindFirstChild("Humanoid")
-		if Humanoid then
-			deathConnection = Humanoid.Died:Connect(function()
-				self:Destroy()
-				deathConnection:Disconnect()
-			end)
-		end
-		if self.handleVanillaAnimator then
-			local AnimateScript = self.Character:FindFirstChild("Animate")
-			if AnimateScript then
-				AnimateScript.Disabled = true
-			end
-			if Humanoid then
-				local characterAnimator = Humanoid:FindFirstChild("Animator")
-				if characterAnimator then
-					do
-						local animationTrack = characterAnimator:GetPlayingAnimationTracks()
-						for i = 1, #animationTrack do
-							animationTrack[i]:Stop()
-						end
-					end
-					characterAnimator:Destroy()
-				end
-			end
-		end
-		noParentConnection = self.Character:GetPropertyChangedSignal("Parent"):Connect(function()
-			if self ~= nil and self.Character.Parent ~= nil then
-				return
-			end
-			self:Destroy()
-			noParentConnection:Disconnect()
-		end)
-	end
-	local start = clock()
-	spawn(function()
-		for i = 1, #self.AnimationData.Frames do
-			if self._stopped then
-				break
-			end
-			local f = self.AnimationData.Frames[i]
-			local t = f.Time / (speed or self.Speed)
-			if f.Name ~= "Keyframe" then
-				self.KeyframeReached:Fire(f.Name)
-			end
-			if f["Marker"] then
-				for k, v in next, f.Marker do
-					if not self._markerSignal[k] then
-						continue
-					end
-					for _, v2 in next, v do
-						self._markerSignal[k]:Fire(v2)
-					end
-				end
-			end
-			if f.Pose then
-				local Pose = f.Pose
-				for count = 1, #Pose do
-					local p = Pose[count]
-					local ft = fadeTime
-					if i ~= 1 then
-						ft = (t * (speed or self.Speed) - self.AnimationData.Frames[i - 1].Time) / (speed or self.Speed)
-					end
-					self:_playPose(p, nil, ft)
-				end
-			end
-			if t > clock() - start then
-				repeat
-					wait()
-				until self._stopped or clock() - start >= t
-			end
-		end
-		if deathConnection then
-			deathConnection:Disconnect()
-			deathConnection = nil
-		end
-		if noParentConnection then
-			noParentConnection:Disconnect()
-			noParentConnection = nil
-		end
-		if self.Looped and not self._stopped then
-			self.DidLoop:Fire()
-			self._isLooping = true
-			return self:Play(fadeTime, weight, speed)
-		end
-		wait()
-		if self.Character and self.handleVanillaAnimator then
-			local Humanoid = self.Character:FindFirstChild("Humanoid")
-			if Humanoid and not Humanoid:FindFirstChildOfClass("Animator") then
-				Instance.new("Animator").Parent = Humanoid
-			end
-			local AnimateScript = self.Character:FindFirstChild("Animate")
-			if AnimateScript and AnimateScript.Disabled then
-				AnimateScript.Disabled = false
-			end
-		end
-		self._stopped = false
-		self._playing = false
-		self.IsPlaying = false
-		self.Stopped:Fire()
-	end)
+function Animator:Play()
+    if not self.Character or self.Character.Parent == nil or self._playing then
+        return
+    end
+    self._playing = true
+    self.IsPlaying = true
+
+    local RunService = game:GetService("RunService")
+    local startTime = tick()
+
+    self._connection = RunService.RenderStepped:Connect(function()
+        if self._stopped then
+            self._connection:Disconnect()
+            self._connection = nil
+            self._playing = false
+            self.IsPlaying = false
+            self.Stopped:Fire()
+            return
+        end
+
+        local elapsed = tick() - startTime
+        local timeInAnimation = elapsed % self.Length
+
+        -- Find two frames to interpolate between
+        local prevFrame, nextFrame
+        for i = 1, #self.AnimationData.Frames do
+            local frame = self.AnimationData.Frames[i]
+            if frame.Time > timeInAnimation then
+                nextFrame = frame
+                prevFrame = self.AnimationData.Frames[i-1] or self.AnimationData.Frames[#self.AnimationData.Frames]
+                break
+            end
+        end
+        if not prevFrame then
+            prevFrame = self.AnimationData.Frames[#self.AnimationData.Frames]
+            nextFrame = self.AnimationData.Frames[1]
+        end
+
+        local frameDelta = nextFrame.Time - prevFrame.Time
+        if frameDelta < 0 then frameDelta = frameDelta + self.Length end
+        local alpha = 0
+        if frameDelta > 0 then
+            local passed = timeInAnimation - prevFrame.Time
+            if passed < 0 then passed = passed + self.Length end
+            alpha = passed / frameDelta
+        end
+
+        -- Override Motor6D transforms every frame (no tweening)
+        for _, pose in pairs(nextFrame.Pose or {}) do
+            local motor = self.Character:FindFirstChildOfClass("Humanoid"):FindFirstChildOfClass("Animator") -- just for example
+            -- You will want to map pose names to Motor6D names, or get Motor6Ds ahead of time
+
+            -- Pseudocode to override motor transform:
+            -- motor.Transform = prevCFrame:Lerp(nextCFrame, alpha)
+
+            -- But to keep it consistent with your actual motor finding, use your utility functions or cache Motor6Ds and set their Transform property here
+
+            -- Example for HumanoidRootPart:
+            if pose.Name == "HumanoidRootPart" then
+                local hrp = self.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local prevCFrame = prevFrame.Pose and prevFrame.Pose[pose.Name]
+                    local nextCFrame = nextFrame.Pose and nextFrame.Pose[pose.Name]
+                    if prevCFrame and nextCFrame then
+                        hrp.CFrame = prevCFrame:Lerp(nextCFrame, alpha)
+                    end
+                end
+            else
+                local motor = self.Character:FindFirstChild("HumanoidRootPart"):FindFirstChild(pose.Name) -- or use your Motor map
+                if motor and motor:IsA("Motor6D") then
+                    local prevCFrame = prevFrame.Pose and prevFrame.Pose[pose.Name]
+                    local nextCFrame = nextFrame.Pose and nextFrame.Pose[pose.Name]
+                    if prevCFrame and nextCFrame then
+                        motor.Transform = prevCFrame:Lerp(nextCFrame, alpha)
+                    end
+                end
+            end
+        end
+    end)
 end
 
 function Animator:GetTimeOfKeyframe(keyframeName)
@@ -320,9 +288,12 @@ function Animator:AdjustSpeed(speed)
 	self.Speed = speed
 end
 
-function Animator:Stop(fadeTime)
-	self._stopFadeTime = fadeTime or 0.100000001
-	self._stopped = true
+function Animator:Stop()
+    if self._connection then
+        self._connection:Disconnect()
+        self._connection = nil
+    end
+    self._stopped = true
 end
 
 function Animator:Destroy()
