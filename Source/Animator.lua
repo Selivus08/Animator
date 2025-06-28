@@ -283,8 +283,38 @@ end
 
 -- Stops playback gracefully
 function Animator:Stop(fadeTime)
+    -- set fade time and mark stopped
     self._stopFadeTime = fadeTime or self._stopFadeTime
     self._stopped = true
+
+    -- Immediately reset transforms on any driven Motor6Ds and Bones
+    local motorMap = Utility:getMotorMap(self.Character, {IgnoreIn=self.MotorIgnoreInList, IgnoreList=self.MotorIgnoreList})
+    local boneMap  = Utility:getBoneMap(self.Character, {IgnoreIn=self.BoneIgnoreInList,  IgnoreList=self.BoneIgnoreList})
+    for _, grp in pairs(motorMap) do
+        for _, lst in pairs(grp) do
+            for _, m in ipairs(lst) do m.Transform = CFrame.new() end
+        end
+    end
+    for _, grp in pairs(boneMap) do
+        for _, lst in pairs(grp) do
+            for _, b in ipairs(lst) do b.Transform = CFrame.new() end
+        end
+    end
+
+    -- Immediately restore default Animator and Animate if we disabled them
+    if self.handleVanillaAnimator and self.Character then
+        local H = self.Character:FindFirstChild("Humanoid")
+        if H then
+            -- recreate Animator if missing
+            if self._disabledAnimator and not H:FindFirstChildOfClass("Animator") then
+                Instance.new("Animator").Parent = H
+            end
+            -- re-enable the Animate script
+            if self._disabledAnimateScript and self._disabledAnimateScript.Parent then
+                self._disabledAnimateScript.Disabled = false
+            end
+        end
+    end
 end
 
 -- Cleans up the Animator
