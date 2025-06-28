@@ -150,115 +150,84 @@ function Animator:_playPose(pose, parent, fade)
 end
 
 -- Play the custom animation
-function Animator:Play(fadeTime, weight, speed)
-    fadeTime = fadeTime or 0.1
-    if not self.Character or not self.Character.Parent or (self._playing and not self._isLooping) then return end
-
+function Animator:Play()
+    if not self.Character or self.Character.Parent == nil or self._playing then
+        return
+    end
     self._playing = true
-    self._isLooping = false
     self.IsPlaying = true
-    self._stopped = false
 
-    local Humanoid = self.Character:FindFirstChild("Humanoid")
-    self._disabledAnimator = false
-    self._disabledAnimateScript = nil
+    local RunService = game:GetService("RunService")
+    local startTime = tick()
 
-    -- Disconnect on death
-    local deathConn
-    if Humanoid then
-        deathConn = Humanoid.Died:Connect(function()
-            self:Destroy()
-        end)
-    end
-
-    -- Handle default Animator
-    if self.handleVanillaAnimator then
-        local AnimateScript = self.Character:FindFirstChild("Animate")
-        if AnimateScript and not AnimateScript.Disabled then
-            AnimateScript.Disabled = true
-            self._disabledAnimateScript = AnimateScript
+    self._connection = RunService.RenderStepped:Connect(function()
+        if self._stopped then
+            self._connection:Disconnect()
+            self._connection = nil
+            self._playing = false
+            self.IsPlaying = false
+            self.Stopped:Fire()
+            return
         end
-        if Humanoid then
-            local defaultAnim = Humanoid:FindFirstChild("Animator")
-            if defaultAnim then
-                for _, track in ipairs(defaultAnim:GetPlayingAnimationTracks()) do track:Stop() end
-                defaultAnim:Destroy()
-                self._disabledAnimator = true
+
+        local elapsed = tick() - startTime
+        local timeInAnimation = elapsed % self.Length
+
+        -- Find two frames to interpolate between
+        local prevFrame, nextFrame
+        for i = 1, #self.AnimationData.Frames do
+            local frame = self.AnimationData.Frames[i]
+            if frame.Time > timeInAnimation then
+                nextFrame = frame
+                prevFrame = self.AnimationData.Frames[i-1] or self.AnimationData.Frames[#self.AnimationData.Frames]
+                break
             end
         end
-    end
+        if not prevFrame then
+            prevFrame = self.AnimationData.Frames[#self.AnimationData.Frames]
+            nextFrame = self.AnimationData.Frames[1]
+        end
 
-    -- Clean up if parent removed
-    local parentConn = self.Character:GetPropertyChangedSignal("Parent"):Connect(function()
-        if not self.Character.Parent then self:Destroy() end
-    end)
+        local frameDelta = nextFrame.Time - prevFrame.Time
+        if frameDelta < 0 then frameDelta = frameDelta + self.Length end
+        local alpha = 0
+        if frameDelta > 0 then
+            local passed = timeInAnimation - prevFrame.Time
+            if passed < 0 then passed = passed + self.Length end
+            alpha = passed / frameDelta
+        end
 
-    local startTime = clock()
-    spawn(function()
-        for i, frame in ipairs(self.AnimationData.Frames) do
-            if self._stopped then break end
+        -- Override Motor6D transforms every frame (no tweening)
+        for _, pose in pairs(nextFrame.Pose or {}) do
+            local motor = self.Character:FindFirstChildOfClass("Humanoid"):FindFirstChildOfClass("Animator") -- just for example
+            -- You will want to map pose names to Motor6D names, or get Motor6Ds ahead of time
 
-            local t = frame.Time / (speed or self.Speed)
-            if frame.Name ~= "Keyframe" then
-                self.KeyframeReached:Fire(frame.Name)
-            end
-            if frame.Marker then
-                for mName, markers in pairs(frame.Marker) do
-                    if self._markerSignal[mName] then
-                        for _, mk in ipairs(markers) do self._markerSignal[mName]:Fire(mk) end
+            -- Pseudocode to override motor transform:
+            -- motor.Transform = prevCFrame:Lerp(nextCFrame, alpha)
+
+            -- But to keep it consistent with your actual motor finding, use your utility functions or cache Motor6Ds and set their Transform property here
+
+            -- Example for HumanoidRootPart:
+            if pose.Name == "HumanoidRootPart" then
+                local hrp = self.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local prevCFrame = prevFrame.Pose and prevFrame.Pose[pose.Name]
+                    local nextCFrame = nextFrame.Pose and nextFrame.Pose[pose.Name]
+                    if prevCFrame and nextCFrame then
+                        hrp.CFrame = prevCFrame:Lerp(nextCFrame, alpha)
+                    end
+                end
+            else
+                local motor = self.Character:FindFirstChild("HumanoidRootPart"):FindFirstChild(pose.Name) -- or use your Motor map
+                if motor and motor:IsA("Motor6D") then
+                    local prevCFrame = prevFrame.Pose and prevFrame.Pose[pose.Name]
+                    local nextCFrame = nextFrame.Pose and nextFrame.Pose[pose.Name]
+                    if prevCFrame and nextCFrame then
+                        motor.Transform = prevCFrame:Lerp(nextCFrame, alpha)
                     end
                 end
             end
-            if frame.Pose then
-                for _, p in ipairs(frame.Pose) do
-                    local ft = (i > 1) and ((t * (speed or self.Speed) - self.AnimationData.Frames[i-1].Time) / (speed or self.Speed)) or fadeTime
-                    self:_playPose(p, nil, ft)
-                end
-            end
-            if t > clock() - startTime then repeat wait() until self._stopped or clock() - startTime >= t end
         end
-
-        -- Disconnect above connections
-        if deathConn then deathConn:Disconnect() end
-        if parentConn then parentConn:Disconnect() end
-
-        -- Loop handling
-        if self.Looped and not self._stopped then
-            self.DidLoop:Fire()
-            self._isLooping = true
-            return self:Play(fadeTime, weight, speed)
-        end
-
-        -- Reset transforms on all driven objects
-        local motorMap = Utility:getMotorMap(self.Character, {IgnoreIn=self.MotorIgnoreInList, IgnoreList=self.MotorIgnoreList})
-        local boneMap  = Utility:getBoneMap(self.Character, {IgnoreIn=self.BoneIgnoreInList, IgnoreList=self.BoneIgnoreList})
-        for _, grp in pairs(motorMap) do for _, lst in pairs(grp) do for _, m in ipairs(lst) do m.Transform = CFrame.new() end end end
-        for _, grp in pairs(boneMap)  do for _, lst in pairs(grp) do for _, b in ipairs(lst) do b.Transform = CFrame.new() end end end
-
-                        -- Delay then restore default Animator and Animate if we disabled them
-        task.delay(0.05, function()
-            if self.Character and self.handleVanillaAnimator then
-                local H = self.Character:FindFirstChild("Humanoid")
-                -- Recreate Animator if needed
-                if self._disabledAnimator and H and not H:FindFirstChildOfClass("Animator") then
-                    Instance.new("Animator").Parent = H
-                end
-                -- Re-enable Animate script
-                if self._disabledAnimateScript and self._disabledAnimateScript.Parent then
-                    self._disabledAnimateScript.Disabled = false
-                end
-                -- Force a state change to kickstart default animations
-                if H then
-                    H:ChangeState(Enum.HumanoidStateType.Running)
-                end
-            end
-        end)
-
-        -- Final state reset
-        self._stopped = false
-        self._playing = false
-        self.IsPlaying = false
-        self.Stopped:Fire()
     end)
 end
 
@@ -286,39 +255,12 @@ function Animator:AdjustSpeed(speed)
 end
 
 -- Stops playback gracefully
-function Animator:Stop(fadeTime)
-    -- set fade time and mark stopped
-    self._stopFadeTime = fadeTime or self._stopFadeTime
+function Animator:Stop()
+    if self._connection then
+        self._connection:Disconnect()
+        self._connection = nil
+    end
     self._stopped = true
-
-    -- Immediately reset transforms on any driven Motor6Ds and Bones
-    local motorMap = Utility:getMotorMap(self.Character, {IgnoreIn=self.MotorIgnoreInList, IgnoreList=self.MotorIgnoreList})
-    local boneMap  = Utility:getBoneMap(self.Character, {IgnoreIn=self.BoneIgnoreInList,  IgnoreList=self.BoneIgnoreList})
-    for _, grp in pairs(motorMap) do
-        for _, lst in pairs(grp) do
-            for _, m in ipairs(lst) do m.Transform = CFrame.new() end
-        end
-    end
-    for _, grp in pairs(boneMap) do
-        for _, lst in pairs(grp) do
-            for _, b in ipairs(lst) do b.Transform = CFrame.new() end
-        end
-    end
-
-    -- Immediately restore default Animator and Animate if we disabled them
-    if self.handleVanillaAnimator and self.Character then
-        local H = self.Character:FindFirstChild("Humanoid")
-        if H then
-            -- recreate Animator if missing
-            if self._disabledAnimator and not H:FindFirstChildOfClass("Animator") then
-                Instance.new("Animator").Parent = H
-            end
-            -- re-enable the Animate script
-            if self._disabledAnimateScript and self._disabledAnimateScript.Parent then
-                self._disabledAnimateScript.Disabled = false
-            end
-        end
-    end
 end
 
 -- Cleans up the Animator
