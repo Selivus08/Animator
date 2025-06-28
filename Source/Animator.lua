@@ -243,9 +243,13 @@ function Animator:Play(fadeTime, weight, speed)
                 if self._disabledAnimator and H and not H:FindFirstChildOfClass("Animator") then
                     Instance.new("Animator").Parent = H
                 end
-                -- Simply re-enable Animate script
+                -- Re-enable Animate script
                 if self._disabledAnimateScript and self._disabledAnimateScript.Parent then
                     self._disabledAnimateScript.Disabled = false
+                end
+                -- Force a state change to kickstart default animations
+                if H then
+                    H:ChangeState(Enum.HumanoidStateType.Running)
                 end
             end
         end)
